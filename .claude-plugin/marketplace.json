@@ -1,0 +1,15 @@
+{
+  "name": "hypervibe-team",
+  "version": "1.0.0",
+  "description": "Marketplace du bootstrap d'installation Hypervibe Team (le harnais lui-même est propriétaire et livré par licence).",
+  "owner": {
+    "name": "Hypervibe"
+  },
+  "plugins": [
+    {
+      "name": "team-installer",
+      "source": ".",
+      "version": "1.0.0"
+    }
+  ]
+}

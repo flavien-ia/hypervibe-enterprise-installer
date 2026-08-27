@@ -1,0 +1,9 @@
+{
+  "name": "team-installer",
+  "displayName": "Hypervibe Team Installer",
+  "version": "1.0.0",
+  "description": "First-install bootstrap for the proprietary Hypervibe Team harnesses. Contains none of them: it enrols the seat with the organisation's licence key and fetches the watermarked copies from hypervibe.fr.",
+  "author": {
+    "name": "Hypervibe"
+  }
+}
