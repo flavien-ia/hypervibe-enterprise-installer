@@ -142,7 +142,17 @@ function declarerPlugin(nom, version, installPath) {
 
   const knownPath = path.join(PLUGINS_DIR, "known_marketplaces.json");
   const known = lireJson(knownPath, {});
-  known[MARKET_NAME] ??= { source: { source: "directory", path: MARKET_DIR } };
+  // installLocation n'est pas décoratif : c'est par lui que Claude Code
+  // localise la marketplace au chargement. Sans lui, le plugin posé finit en
+  // « failed to load : Marketplace not found » (constaté au banc VM, 30/08).
+  known[MARKET_NAME] ??= {
+    source: { source: "directory", path: MARKET_DIR },
+    installLocation: MARKET_DIR,
+    lastUpdated: new Date().toISOString(),
+  };
+  if (!known[MARKET_NAME].installLocation) {
+    known[MARKET_NAME].installLocation = MARKET_DIR;
+  }
   ecrireJson(knownPath, known);
 
   // 2. installed_plugins.json (v2).
