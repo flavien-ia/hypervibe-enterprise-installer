@@ -1,6 +1,6 @@
 ---
 name: install-hypervibe-team
-description: First-time installation of the Hypervibe Team harnesses on this machine. Asks whether this seat is the organisation admin or a collaborator, collects the licence key in a masked OS window (never through the chat), enrols the seat with hypervibe.fr, downloads the watermarked copies and registers them in Claude Code. Use when the user says "installe hypervibe team", "/install-hypervibe-team", "install the team plugin", or has just installed this bootstrap plugin and wants the real harnesses.
+description: First-time installation of the Hypervibe Team harnesses on this machine. Asks whether this seat is the organisation admin or a collaborator, collects the personal access key (hvs_..., from the person's app.hypervibe.fr space ; the legacy organisation key is still accepted for pre-invitation machines) in a masked OS window (never through the chat), enrols the seat with hypervibe.fr, downloads the watermarked copies and registers them in Claude Code. Use when the user says "installe hypervibe team", "/install-hypervibe-team", "install the team plugin", or has just installed this bootstrap plugin and wants the real harnesses.
 ---
 
 # Installer Hypervibe Team sur ce poste
@@ -19,11 +19,13 @@ Via `AskUserQuestion` (header `Rôle`) :
 
 Retenir `HARNESS=both` (admin) ou `HARNESS=collab` (collaborateur).
 
-## Étape 2 - La clé de licence, en fenêtre masquée
+## Étape 2 - La clé d'accès, en fenêtre masquée
 
 Prévenir d'une phrase :
 
-> Ton organisation a reçu une clé de licence (format `HV-TEAM-XXXX-XXXX`). Elle ne passe jamais par notre conversation : une petite fenêtre va s'ouvrir pour la saisir.
+> Ton invitation t'a ouvert un compte sur app.hypervibe.fr : dans l'onglet « Licence et téléchargements » t'attend ta **clé d'accès personnelle** (elle commence par `hvs_`). Elle ne passe jamais par notre conversation : une petite fenêtre va s'ouvrir pour la saisir.
+
+(Un poste installé avant les invitations peut encore saisir la clé d'organisation `HV-TEAM-XXXX-XXXX` : la fenêtre accepte les deux.)
 
 ```bash
 node "${CLAUDE_SKILL_DIR}/../../scripts/window.mjs"
@@ -42,6 +44,8 @@ Une ligne JSON par harnais. Lire chaque ligne :
 - `ok: true` → installé (`version`, `installPath`). Continuer.
 - `code: "deja_installe"` → ce harnais est déjà là ; dire que la mise à jour se fait par `/update-hypervibe-team` dans une session où il est chargé.
 - `code: "licence_revoquee" | "licence_suspendue" | "siege_revoque"` → transmettre le message tel quel : c'est l'organisation ou Hypervibe qui a fermé ce droit, rien à forcer.
+- `code: "poste_non_invite" | "jeton_inconnu"` → ce poste n'a pas d'invitation valable : transmettre le message (l'admin de l'organisation invite depuis app.hypervibe.fr, la personne y trouve sa clé personnelle), proposer de relancer une fois la clé récupérée.
+- `code: "harnais_reserve"` → le harnais administrateur demande le rôle d'administrateur : transmettre le message (c'est l'admin principal qui promeut, depuis son tableau de bord).
 - `code: "hors_ligne"` → réessayer plus tard, rien n'est cassé.
 - `code: "registre_inconnu"` → le zip est prêt (chemin dans `zip`) ; guider l'installation manuelle : Claude Desktop, onglet Code, Personnaliser, Plugins, Ajouter, Téléverser un plugin, choisir ce fichier.
 - Tout autre échec → transmettre le message, proposer de réessayer.

@@ -195,15 +195,18 @@ async function api(route, payload) {
 }
 
 async function principal() {
+  // La clé personnelle (jeton hvs_, chemin nominal) ou la clé
+  // d'organisation (transition) : la fenêtre a rangé l'une des deux.
   const cle = lireJson(CACHE_FILE)?.licenseKey;
-  if (!cle) {
+  let jeton = lireJson(SEAT_FILE)?.seatToken || null;
+  if (!cle && !jeton) {
     return rendre({ ok: false, code: "cle_absente", message: "Aucune clé enregistrée sur ce poste : la fenêtre de saisie n'a pas abouti." });
   }
 
   // Un siège = une personne/machine, partagé par les deux harnais.
   let seat = lireJson(SEAT_FILE) || {};
   if (!seat.seatUuid) {
-    seat = { seatUuid: crypto.randomUUID(), createdAt: new Date().toISOString() };
+    seat = { ...seat, seatUuid: crypto.randomUUID(), createdAt: new Date().toISOString() };
     ecrireJson(SEAT_FILE, seat);
   }
 
@@ -220,7 +223,7 @@ async function principal() {
     let act;
     try {
       act = await api("/api/team/activate", {
-        licenseKey: cle,
+        ...(jeton ? { seatToken: jeton } : { licenseKey: cle }),
         seatUuid: seat.seatUuid,
         harness,
         pluginVersion: "0.0.0",
@@ -236,12 +239,13 @@ async function principal() {
     if (act.seatToken) {
       const s = lireJson(SEAT_FILE) || {};
       ecrireJson(SEAT_FILE, { ...s, seatToken: act.seatToken });
+      jeton = act.seatToken;
     }
 
     // Téléchargement de l'exemplaire filigrané, empreinte vérifiée.
     let dl;
     try {
-      dl = await api("/api/team/download", act.seatToken ? { seatToken: act.seatToken, harness } : { licenseKey: cle, seatUuid: seat.seatUuid, harness });
+      dl = await api("/api/team/download", jeton ? { seatToken: jeton, harness } : { licenseKey: cle, seatUuid: seat.seatUuid, harness });
     } catch {
       rendre({ ok: false, harness, code: "hors_ligne", message: "Téléchargement interrompu : réessaie plus tard." });
       continue;

@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // ask-key.mjs - tourne DANS la fenêtre ouverte par window.mjs (vrai TTY).
-// Saisie masquée de la clé de licence, validation de forme, écriture directe
-// dans ~/.hypervibe/team-license.json : la clé ne passe JAMAIS par la
-// conversation Claude, c'est la règle de tout l'écosystème Hypervibe.
+// Saisie masquée de la clé d'accès, validation de forme, écriture directe
+// dans ~/.hypervibe : la clé ne passe JAMAIS par la conversation Claude,
+// c'est la règle de tout l'écosystème Hypervibe. Deux formes acceptées :
+// la clé d'accès PERSONNELLE (hvs_..., remise à l'invitation, chemin
+// nominal) et la clé d'organisation (HV-TEAM-XXXX-XXXX, transition des
+// postes d'avant les invitations).
 //
 // Ce fichier est volontairement autonome (zéro dépendance, zéro import du
 // harnais) : le stub s'installe avant tout le reste.
@@ -14,7 +17,9 @@ import readline from "node:readline";
 
 const HV_DIR = path.join(os.homedir(), ".hypervibe");
 const CACHE_FILE = path.join(HV_DIR, "team-license.json");
+const SEAT_FILE = path.join(HV_DIR, "team-seat.json");
 const KEY_REGEX = /^HV-TEAM-[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$/;
+const SEAT_TOKEN_REGEX = /^HVS_[0-9A-F]{48}$/;
 
 function promptMasked(question) {
   return new Promise((resolve, reject) => {
@@ -68,11 +73,13 @@ function promptVisible(question) {
 }
 
 console.log("─".repeat(60));
-console.log("  Hypervibe Team : clé de licence de ton organisation");
+console.log("  Hypervibe Team : ta clé d'accès");
 console.log("─".repeat(60));
 console.log("");
-console.log("  Elle est au format HV-TEAM-XXXX-XXXX (email de livraison,");
-console.log("  ou la personne qui administre Hypervibe chez vous).");
+console.log("  Ta clé d'accès PERSONNELLE commence par hvs_ : elle t'attend");
+console.log("  dans ton espace app.hypervibe.fr, onglet Licence et");
+console.log("  téléchargements. (Les postes d'avant les invitations peuvent");
+console.log("  encore saisir la clé d'organisation HV-TEAM-XXXX-XXXX.)");
 console.log("  La saisie est masquée : c'est normal de voir des étoiles.");
 console.log("");
 
