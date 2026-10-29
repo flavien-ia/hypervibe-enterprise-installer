@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// install.mjs - installe le ou les harnais Hypervibe Team sur ce poste.
+// install.mjs - installe le ou les harnais Hypervibe Enterprise sur ce poste.
 //
 //   node install.mjs --harness admin|collab|both
 //
@@ -18,6 +18,12 @@
 // changé), le script POSE le zip dans le dossier de téléchargements et rend la
 // main avec le mode d'emploi manuel : il ne bricole jamais un format inconnu.
 //
+// Hypervibe Team s'appelle désormais Hypervibe Enterprise (2.0.0 de cet
+// installateur, harnais 2.5.0). Un harnais déjà posé sous l'ancien nom est
+// « déjà installé » : c'est sa propre mise à jour qui lui donne le nouveau nom.
+// Le siège d'un poste qui en avait déjà un est repris tel quel (jamais un
+// second seatUuid), sous l'un ou l'autre nom de fichier.
+//
 // Sortie : une ligne JSON par harnais installé. Jamais de process.exit après
 // du réseau (Windows) : process.exitCode.
 
@@ -29,11 +35,17 @@ import { inflateRawSync } from "node:zlib";
 
 const API_BASE = process.env.HYPERVIBE_LICENSE_API || "https://hypervibe.fr";
 const HV_DIR = path.join(os.homedir(), ".hypervibe");
-const SEAT_FILE = path.join(HV_DIR, "team-seat.json");
-const CACHE_FILE = path.join(HV_DIR, "team-license.json");
+// Les fichiers de poste, sous le nouveau nom ; ceux d'un poste équipé avant la
+// 2.5.0 portent l'ancien, et se lisent encore.
+const SEAT_FILE = path.join(HV_DIR, "enterprise-seat.json");
+const OLD_SEAT_FILE = path.join(HV_DIR, "team-seat.json");
+const CACHE_FILE = path.join(HV_DIR, "enterprise-license.json");
+const OLD_CACHE_FILE = path.join(HV_DIR, "team-license.json");
 const PLUGINS_DIR = path.join(os.homedir(), ".claude", "plugins");
 const MARKET_NAME = "local-desktop-app-uploads";
 const MARKET_DIR = path.join(PLUGINS_DIR, "marketplaces", MARKET_NAME);
+const PREFIXE = "hypervibe-enterprise-";
+const ANCIEN_PREFIXE = "hypervibe-team-";
 
 const resultats = [];
 const rendre = (obj) => {
@@ -41,12 +53,19 @@ const rendre = (obj) => {
   console.log(JSON.stringify(obj));
 };
 
-function lireJson(p, defaut = null) {
+function lireJsonOu(p, defaut = null) {
   try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return defaut; }
 }
-function ecrireJson(p, o) {
+function ecrireJsonPoste(p, o) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, JSON.stringify(o, null, 2) + "\n");
+}
+/** Le siège, sous le nouveau nom d'abord, sinon sous l'ancien. */
+const lireSiege = () => lireJsonOu(SEAT_FILE) || lireJsonOu(OLD_SEAT_FILE);
+/** Écrit le siège sous le nouveau nom, et sous l'ancien s'il existe (un harnais d'avant ne lit que lui). */
+function ecrireSiege(o) {
+  ecrireJsonPoste(SEAT_FILE, o);
+  if (fs.existsSync(OLD_SEAT_FILE)) ecrireJsonPoste(OLD_SEAT_FILE, o);
 }
 
 // ─── Arguments ───────────────────────────────────────────────────────────────
@@ -110,72 +129,91 @@ function extraire(entrees, destination) {
   }
 }
 
-// ─── Registre Claude Code ────────────────────────────────────────────────────
+// >>> déclaration partagée
+// Ce bloc est le même, au caractère près, dans l'installateur public (scripts/install.mjs) et dans
+// le module de migration des harnais (scripts/license/enterprise-migration.mjs) : une seule façon
+// de déclarer un plugin posé dans la marketplace locale, celle que Claude Desktop applique à un
+// téléversement. Une recette de l'atelier les compare.
+function lireRegistreJson(p) {
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function ecrireRegistreJson(p, data) {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(data, null, 2) + "\n", "utf8");
+}
+
+/** Les chemins des registres, depuis le dossier de la marketplace (…/plugins/marketplaces/<m>). */
+function registres(mp) {
+  const plugins = path.dirname(path.dirname(mp));
+  return {
+    market: path.basename(mp),
+    catalogue: path.join(mp, ".claude-plugin", "marketplace.json"),
+    known: path.join(plugins, "known_marketplaces.json"),
+    installed: path.join(plugins, "installed_plugins.json"),
+    settings: path.join(path.dirname(plugins), "settings.json"),
+  };
+}
+
 /**
- * Le registre a-t-il la forme qu'on sait écrire ? On vérifie AVANT de poser
- * quoi que ce soit : un format inconnu = repli manuel, jamais d'écriture à
- * l'aveugle dans les fichiers internes d'un autre logiciel.
+ * Les registres ont-ils la forme qu'on sait écrire ? Vérifié AVANT toute écriture : une forme
+ * inconnue, et rien n'est touché (jamais d'écriture à l'aveugle dans les fichiers d'un autre
+ * logiciel). Un fichier absent a la forme vide qu'on connaît ; un fichier présent mais illisible
+ * n'a pas de forme connue.
  */
-function registreCompatible() {
-  const installed = lireJson(path.join(PLUGINS_DIR, "installed_plugins.json"), { version: 2, plugins: {} });
-  if (installed.version !== 2 || typeof installed.plugins !== "object") return false;
-  const known = lireJson(path.join(PLUGINS_DIR, "known_marketplaces.json"), {});
-  if (typeof known !== "object" || Array.isArray(known)) return false;
+export function registreCompatible(mp) {
+  const r = registres(mp);
+  const lu = (p, defaut) => (fs.existsSync(p) ? lireRegistreJson(p) : defaut);
+  const installed = lu(r.installed, { version: 2, plugins: {} });
+  if (!installed || installed.version !== 2 || !installed.plugins || typeof installed.plugins !== "object" || Array.isArray(installed.plugins)) return false;
+  for (const [, v] of Object.entries(installed.plugins)) if (!Array.isArray(v)) return false;
+  const known = lu(r.known, {});
+  if (!known || typeof known !== "object" || Array.isArray(known)) return false;
+  const settings = lu(r.settings, {});
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return false;
+  if (settings.enabledPlugins !== undefined && (typeof settings.enabledPlugins !== "object" || Array.isArray(settings.enabledPlugins) || settings.enabledPlugins === null)) return false;
+  const catalogue = lu(r.catalogue, { plugins: [] });
+  if (!catalogue || !Array.isArray(catalogue.plugins)) return false;
   return true;
 }
 
-function declarerPlugin(nom, version, installPath) {
-  // 1. La marketplace locale existe (dossier + manifeste + known_marketplaces).
-  const manifeste = path.join(MARKET_DIR, ".claude-plugin", "marketplace.json");
-  const market = lireJson(manifeste, {
-    name: MARKET_NAME,
-    version: "1.0.0",
-    description: "Locally uploaded plugins",
-    owner: { name: "Local User" },
-    plugins: [],
-  });
+/**
+ * Déclare un plugin posé dans la marketplace locale, comme le fait un téléversement par Claude
+ * Desktop : le catalogue de la marketplace (créé s'il manque), known_marketplaces,
+ * installed_plugins, settings.enabledPlugins. Le reste de chaque fichier est gardé.
+ */
+export function declarerPlugin(mp, nom, version, installPath) {
+  const r = registres(mp);
+  const catalogue = lireRegistreJson(r.catalogue) ?? { name: r.market, version: "1.0.0", description: "Locally uploaded plugins", owner: { name: "Local User" }, plugins: [] };
   const entree = { name: nom, version, source: `./${nom}` };
-  const i = market.plugins.findIndex((p) => p.name === nom);
-  if (i >= 0) market.plugins[i] = entree;
-  else market.plugins.push(entree);
-  ecrireJson(manifeste, market);
+  const i = catalogue.plugins.findIndex((p) => p?.name === nom);
+  if (i >= 0) catalogue.plugins[i] = { ...catalogue.plugins[i], ...entree };
+  else catalogue.plugins.push(entree);
+  ecrireRegistreJson(r.catalogue, catalogue);
 
-  const knownPath = path.join(PLUGINS_DIR, "known_marketplaces.json");
-  const known = lireJson(knownPath, {});
-  // installLocation n'est pas décoratif : c'est par lui que Claude Code
-  // localise la marketplace au chargement. Sans lui, le plugin posé finit en
-  // « failed to load : Marketplace not found » (constaté au banc VM, 30/08).
-  known[MARKET_NAME] ??= {
-    source: { source: "directory", path: MARKET_DIR },
-    installLocation: MARKET_DIR,
-    lastUpdated: new Date().toISOString(),
-  };
-  if (!known[MARKET_NAME].installLocation) {
-    known[MARKET_NAME].installLocation = MARKET_DIR;
-  }
-  ecrireJson(knownPath, known);
+  const known = lireRegistreJson(r.known) ?? {};
+  // installLocation n'est pas décoratif : c'est par lui que Claude Code localise la marketplace
+  // au chargement (« Marketplace not found » sans lui, constaté au banc le 30/08/2026).
+  known[r.market] ??= { source: { source: "directory", path: mp }, installLocation: mp, lastUpdated: new Date().toISOString() };
+  if (!known[r.market].installLocation) known[r.market].installLocation = mp;
+  ecrireRegistreJson(r.known, known);
 
-  // 2. installed_plugins.json (v2).
-  const installedPath = path.join(PLUGINS_DIR, "installed_plugins.json");
-  const installed = lireJson(installedPath, { version: 2, plugins: {} });
-  const cle = `${nom}@${MARKET_NAME}`;
+  const installed = lireRegistreJson(r.installed) ?? { version: 2, plugins: {} };
+  const cle = `${nom}@${r.market}`;
   const maintenant = new Date().toISOString();
   const existante = Array.isArray(installed.plugins[cle]) ? installed.plugins[cle][0] : null;
-  installed.plugins[cle] = [{
-    scope: "user",
-    installPath,
-    version,
-    installedAt: existante?.installedAt ?? maintenant,
-    lastUpdated: maintenant,
-  }];
-  ecrireJson(installedPath, installed);
+  installed.plugins[cle] = [{ scope: "user", installPath, version, installedAt: existante?.installedAt ?? maintenant, lastUpdated: maintenant }];
+  ecrireRegistreJson(r.installed, installed);
 
-  // 3. settings.enabledPlugins : activer, sans toucher au reste du fichier.
-  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
-  const settings = lireJson(settingsPath, {});
+  const settings = lireRegistreJson(r.settings) ?? {};
   settings.enabledPlugins = { ...(settings.enabledPlugins || {}), [cle]: true };
-  ecrireJson(settingsPath, settings);
+  ecrireRegistreJson(r.settings, settings);
 }
+// <<< déclaration partagée
 
 // ─── Le parcours ─────────────────────────────────────────────────────────────
 async function api(route, payload) {
@@ -197,36 +235,44 @@ async function api(route, payload) {
 async function principal() {
   // La clé personnelle (jeton hvs_, chemin nominal) ou la clé
   // d'organisation (transition) : la fenêtre a rangé l'une des deux.
-  const cle = lireJson(CACHE_FILE)?.licenseKey;
-  let jeton = lireJson(SEAT_FILE)?.seatToken || null;
+  const cle = (lireJsonOu(CACHE_FILE) || lireJsonOu(OLD_CACHE_FILE))?.licenseKey;
+  let jeton = lireSiege()?.seatToken || null;
   if (!cle && !jeton) {
     return rendre({ ok: false, code: "cle_absente", message: "Aucune clé enregistrée sur ce poste : la fenêtre de saisie n'a pas abouti." });
   }
 
-  // Un siège = une personne/machine, partagé par les deux harnais.
-  let seat = lireJson(SEAT_FILE) || {};
+  // Un siège = une personne/machine, partagé par les deux harnais, repris tel
+  // quel quand le poste en a déjà un (sous l'un ou l'autre nom de fichier).
+  let seat = lireSiege() || {};
   if (!seat.seatUuid) {
     seat = { ...seat, seatUuid: crypto.randomUUID(), createdAt: new Date().toISOString() };
-    ecrireJson(SEAT_FILE, seat);
   }
+  ecrireSiege(seat);
 
   for (const harness of HARNAIS) {
-    const nom = `hypervibe-team-${harness}`;
+    const nom = `${PREFIXE}${harness}`;
+    const ancienNom = `${ANCIEN_PREFIXE}${harness}`;
     const installPath = path.join(MARKET_DIR, nom);
 
     if (fs.existsSync(installPath)) {
-      rendre({ ok: false, harness, code: "deja_installe", message: `${nom} est déjà installé : c'est /update-hypervibe-team qui le met à jour.` });
+      rendre({ ok: false, harness, code: "deja_installe", message: `${nom} est déjà installé : c'est /update-hypervibe-enterprise qui le met à jour.` });
+      continue;
+    }
+    // Un harnais posé avant le nouveau nom : il est installé, et c'est sa mise à jour qui le renomme.
+    if (fs.existsSync(path.join(MARKET_DIR, ancienNom))) {
+      rendre({ ok: false, harness, code: "deja_installe", ancienNom: true, message: `Ce harnais est déjà installé sous son nom d'avant Hypervibe Enterprise : sa mise à jour (/update-hypervibe-enterprise, ou l'ancienne commande sur une version d'avant) lui donne le nouveau nom.` });
       continue;
     }
 
     // Enrôlement (idempotent : re-rend le même jeton de siège).
     let act;
     try {
-      act = await api("/api/team/activate", {
+      act = await api("/api/enterprise/activate", {
         ...(jeton ? { seatToken: jeton } : { licenseKey: cle }),
         seatUuid: seat.seatUuid,
         harness,
         pluginVersion: "0.0.0",
+        pluginName: nom,
       });
     } catch {
       rendre({ ok: false, harness, code: "hors_ligne", message: "hypervibe.fr injoignable : réessaie quand le réseau revient." });
@@ -237,15 +283,14 @@ async function principal() {
       continue;
     }
     if (act.seatToken) {
-      const s = lireJson(SEAT_FILE) || {};
-      ecrireJson(SEAT_FILE, { ...s, seatToken: act.seatToken });
+      ecrireSiege({ ...(lireSiege() || {}), seatToken: act.seatToken });
       jeton = act.seatToken;
     }
 
     // Téléchargement de l'exemplaire filigrané, empreinte vérifiée.
     let dl;
     try {
-      dl = await api("/api/team/download", jeton ? { seatToken: jeton, harness } : { licenseKey: cle, seatUuid: seat.seatUuid, harness });
+      dl = await api("/api/enterprise/download", jeton ? { seatToken: jeton, harness } : { licenseKey: cle, seatUuid: seat.seatUuid, harness });
     } catch {
       rendre({ ok: false, harness, code: "hors_ligne", message: "Téléchargement interrompu : réessaie plus tard." });
       continue;
@@ -267,7 +312,7 @@ async function principal() {
     }
 
     // Repli manuel si le registre n'a pas la forme connue.
-    if (!registreCompatible()) {
+    if (!registreCompatible(MARKET_DIR)) {
       const depot = path.join(HV_DIR, "updates", `${nom}-${dl.version}.zip`);
       fs.mkdirSync(path.dirname(depot), { recursive: true });
       fs.writeFileSync(depot, buf);
@@ -278,22 +323,27 @@ async function principal() {
       continue;
     }
 
-    // Extraction à part, validation, pose, déclaration.
+    // Extraction à part, validation, pose, déclaration. L'archive porte le nouveau nom ; une
+    // version approuvée par l'organisation d'avant la 2.5.0 arrive sous l'ancien, et se pose sous
+    // le nom qu'elle porte (elle ne connaît que lui ; sa mise à jour le changera).
     const extraction = path.join(HV_DIR, "updates", `install-${harness}-${Date.now()}`);
+    let cible = installPath;
     try {
       extraire(lireArchive(buf), extraction);
       const racines = fs.readdirSync(extraction);
       const source = racines.length === 1 ? path.join(extraction, racines[0]) : extraction;
-      const manifest = lireJson(path.join(source, ".claude-plugin", "plugin.json"));
-      if (manifest?.name !== nom) throw new Error(`archive inattendue (${String(manifest?.name)})`);
-      fs.mkdirSync(path.dirname(installPath), { recursive: true });
-      fs.renameSync(source, installPath);
+      const manifest = lireJsonOu(path.join(source, ".claude-plugin", "plugin.json"));
+      const posee = manifest?.name === nom || manifest?.name === ancienNom ? manifest.name : null;
+      if (!posee) throw new Error(`archive inattendue (${String(manifest?.name)})`);
+      cible = path.join(MARKET_DIR, posee);
+      fs.mkdirSync(path.dirname(cible), { recursive: true });
+      fs.renameSync(source, cible);
       fs.rmSync(extraction, { recursive: true, force: true });
-      declarerPlugin(nom, String(manifest.version || dl.version), installPath);
-      rendre({ ok: true, harness, version: String(manifest.version || dl.version), installPath });
+      declarerPlugin(MARKET_DIR, posee, String(manifest.version || dl.version), cible);
+      rendre({ ok: true, harness, name: posee, version: String(manifest.version || dl.version), installPath: cible });
     } catch (e) {
       fs.rmSync(extraction, { recursive: true, force: true });
-      fs.rmSync(installPath, { recursive: true, force: true });
+      if (cible && fs.existsSync(cible)) fs.rmSync(cible, { recursive: true, force: true });
       rendre({ ok: false, harness, code: "pose_echouee", message: String(e?.message || e) });
     }
   }

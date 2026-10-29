@@ -29,7 +29,7 @@ if (OS === "win32") {
 }
 
 // macOS / Linux : fenêtre + sentinelle portant le code de sortie interne.
-const sentinel = join(tmpdir(), `hv-team-key-${process.pid}.done`);
+const sentinel = join(tmpdir(), `hv-enterprise-key-${process.pid}.done`);
 try { if (existsSync(sentinel)) rmSync(sentinel); } catch { /* neuf */ }
 const sh = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
 const nodeCmd = `node --no-deprecation ${sh(ASK)}`;

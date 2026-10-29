@@ -5,9 +5,10 @@
 // c'est la règle de tout l'écosystème Hypervibe. Deux formes acceptées :
 // - la clé d'accès PERSONNELLE (hvs_..., remise à l'invitation, chemin
 //   nominal), rangée dans le fichier de siège, là où license.mjs la lit ;
-// - la clé d'organisation (HV-TEAM-XXXX-XXXX, transition des postes d'avant
-//   les invitations), rangée dans le cache de licence. Elle ne fait plus que
-//   ré-activer un poste déjà connu du serveur.
+// - la clé d'organisation (HV-ENT-XXXX-XXXX, transition des postes d'avant
+//   les invitations ; une clé émise avant la 2.5.0 garde son ancienne forme,
+//   valable sans limite), rangée dans le cache de licence. Elle ne fait plus
+//   que ré-activer un poste déjà connu du serveur.
 //
 // Jusqu'à la 2.2.6, la fenêtre ne reconnaissait que la clé d'organisation :
 // la clé personnelle, seul moyen d'ouvrir un poste depuis le 31/08/2026, était
@@ -15,7 +16,10 @@
 // pour que leur recette tienne les deux formes.
 //
 // Ce fichier est volontairement autonome (zéro dépendance, zéro import du
-// harnais) : le stub s'installe avant tout le reste.
+// harnais) : le stub s'installe avant tout le reste. Il porte donc lui-même
+// les deux noms des fichiers de poste (enterprise-*.json, et l'ancien, que
+// enterprise-migration.mjs décrit) : le siège se lit sous les deux, et son
+// seatUuid ne change jamais.
 
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -25,7 +29,10 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
 const HV_DIR = path.join(os.homedir(), ".hypervibe");
-const KEY_REGEX = /^HV-TEAM-[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$/;
+const KEY_REGEX = /^HV-(ENT|TEAM)-[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$/;
+// Les fichiers de poste : le nouveau nom, puis celui d'avant la 2.5.0.
+const SIEGE = ["enterprise-seat.json", "team-seat.json"];
+const LICENCE = ["enterprise-license.json", "team-license.json"];
 // La forme exacte que produit le serveur (generateSeatToken), la seule qu'il
 // reconnaît : en minuscules.
 const SEAT_TOKEN_REGEX = /^hvs_[0-9a-f]{48}$/;
@@ -67,16 +74,22 @@ function ecrireJson(fichier, donnees) {
 export function rangerCle(dossier, cle) {
   fs.mkdirSync(dossier, { recursive: true });
   if (cle.type === "personnelle") {
-    const fichier = path.join(dossier, "team-seat.json");
-    const siege = lireJson(fichier) || {};
+    const fichier = path.join(dossier, SIEGE[0]);
+    const ancien = path.join(dossier, SIEGE[1]);
+    // Le siège d'un poste qui avait un harnais d'avant la 2.5.0 : son seatUuid est repris,
+    // jamais remplacé (un second seatUuid serait un second siège).
+    const siege = lireJson(fichier) || lireJson(ancien) || {};
     const complet = siege.seatUuid
       ? siege
       : { ...siege, seatUuid: crypto.randomUUID(), createdAt: new Date().toISOString() };
     ecrireJson(fichier, { ...complet, seatToken: cle.valeur });
+    // L'ancien fichier, s'il existe, reçoit la même clé : un harnais d'avant la 2.5.0 ne lit que lui.
+    if (fs.existsSync(ancien)) ecrireJson(ancien, { ...complet, seatToken: cle.valeur });
     return fichier;
   }
-  const fichier = path.join(dossier, "team-license.json");
-  ecrireJson(fichier, { ...(lireJson(fichier) || {}), licenseKey: cle.valeur });
+  const fichier = path.join(dossier, LICENCE[0]);
+  const cache = lireJson(fichier) || lireJson(path.join(dossier, LICENCE[1])) || {};
+  ecrireJson(fichier, { ...cache, licenseKey: cle.valeur });
   return fichier;
 }
 
@@ -146,13 +159,13 @@ function lanceDirectement() {
 
 if (lanceDirectement()) {
   console.log("─".repeat(60));
-  console.log("  Hypervibe Team : ta clé d'accès");
+  console.log("  Hypervibe Enterprise : ta clé d'accès");
   console.log("─".repeat(60));
   console.log("");
   console.log("  Ta clé d'accès PERSONNELLE commence par hvs_ : elle t'attend");
   console.log("  dans ton espace app.hypervibe.fr, onglet Licence et");
   console.log("  téléchargements. (Les postes d'avant les invitations peuvent");
-  console.log("  encore saisir la clé d'organisation HV-TEAM-XXXX-XXXX.)");
+  console.log("  encore saisir la clé d'organisation HV-ENT-XXXX-XXXX.)");
   console.log("  La saisie est masquée : c'est normal de voir des étoiles.");
   console.log("");
 
